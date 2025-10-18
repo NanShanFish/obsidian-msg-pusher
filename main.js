@@ -1,7 +1,7 @@
 /**
  * 原始代码来自: Leibniz/obsidian-wxpusher-reminder (https://github.com/Liberniz/obsidian-wxpusher-reminder)
  * 修改者: nanshanfish
- * 修改内容: QQ消息适配/日期解析优化
+ * 修改内容: 普通消息适配/日期解析优化
  */
 
 var y = Object.defineProperty;
@@ -29,17 +29,19 @@ var n = require("obsidian");
 
 // 插件默认设置
 var R = {
-    appToken: "",     // token
-    uid: "",          // QQ 号
-    reminderDays: 7,  // 提前提醒天数（0=当天，1=明天等）
-    scanTime: "14:00", // 每日扫描时间（24小时制）
+    url: "",
+    requestBody: "",
+    msg_str: "",
+    msg_key: "",
+    reminderDays: 7,        // 提前提醒天数（0=当天，1=明天等）
+    scanTime: "8:00",       // 每日扫描时间（24小时制）
     includedFolders: "",
     nextScheduledTime: ""
 };
 
 var m = class extends n.Plugin {
     async onload() {
-        console.log("Loading QQPusher Reminder Plugin");
+        console.log("Loading Pusher Reminder Plugin");
         await this.loadSettings();
 
         // 添加命令：检查任务并发送提醒
@@ -54,12 +56,11 @@ var m = class extends n.Plugin {
         this.TFile = TFile
         this.TFolder = TFolder
 
-        // 添加命令：测试 QQPusher 连接
         this.addCommand({
-            id: "test-wxpusher-connection",
-            name: "Test QQPusher Connection",
+            id: "test-pusher-connection",
+            name: "Test Pusher Connection",
             callback: () => {
-                this.testQmsgConnection();
+                this.testMsgPusherConnection();
             }
         });
 
@@ -82,7 +83,7 @@ var m = class extends n.Plugin {
    * 插件卸载时调用
    */
     async onunload() {
-        console.log("Unloading QQPusher Reminder Plugin");
+        console.log("Unloading Pusher Reminder Plugin");
     }
 
     /**
@@ -101,49 +102,49 @@ var m = class extends n.Plugin {
     }
 
     /**
-   * 测试 QQPusher 连接
+   * 测试 Pusher 连接
    */
-    async testQmsgConnection() {
-        console.log("Testing QQPusher connection...");
-        let { appToken: s, uid: t } = this.settings;
+    async testMsgPusherConnection() {
+        console.log("Testing Pusher connection...");
+        let { url: u, msg_key: k, msg_str: s, requestBody: rb } = this.settings
 
         // 检查配置是否完整
-        if (!s || !t) {
-            new n.Notice("QQPusher appToken or UID is not configured. Please configure it in the plugin settings.");
-            console.log("QQPusher appToken or UID is missing for test.");
+        if (!u || !rb || !k || !s) {
+            new n.Notice("Pusher url/requestBody/msg key/str not set");
+            console.log("Pusher url or requestBody is missing for test.");
             return;
         }
 
-        new n.Notice("Sending test message via QQPusher...");
-        let e = "This is a test message from the Obsidian QQPusher Reminder plugin.";
-        await this.sendQmsgNotification(s, t, e, !0);
+        new n.Notice("Sending test message via Pusher...");
+        let e = "This is a test message from the Obsidian Msg Pusher plugin.";
+        await this.sendMsg(u, k, s, rb, e, !0);
     }
 
     async checkTasksAndSendReminders(force) {
-        let { appToken: s, uid: t, reminderDays: e, includedFolders: includedFoldersSetting, nextScheduledTime: last_next_time_str } = this.settings;
+        let { url: u, msg_key: k, msg_str: s, requestBody: rb, reminderDays: e, includedFolders: includedFoldersSetting, nextScheduledTime: last_next_time_str } = this.settings;
 
-        if (!s || !t) {
-            console.log("QQPusher appToken or UID is not configured. Skipping reminder check.");
+        if (!u || !rb || !k || !s) {
+            console.log("Pusher url/requestBody/msg key/str not set");
             return;
         }
 
         // 1. 准备时间范围
-        let [next_scheduled_time, o] = this.getNextScheduledTime();
+        const [next_scheduled_time, o] = this.getNextScheduledTime();
         const last_next_time = new Date(last_next_time_str)
         if (last_next_time > o && !force) {
             console.log("未到触发时间, 已停止")
             return
         }
 
-        let now = moment(o)
-        let startDate = now.startOf('day');
-        let endDate = now.clone().add(e, 'days').endOf('day');
+        const now = moment(o)
+        const startDate = now.startOf('day');
+        const endDate = now.clone().add(e, 'days').endOf('day');
 
         let taskCount = 0;
         let tasksDueSoon = [];
 
         // 用于匹配任务的正则表达式
-        let taskRegex = /-\s*\[ \]\s*(.*?)\s*📅 (\d{4}-)?(\d+-\d+)\s*(\d+:\d+)?/g;
+        const taskRegex = /-\s*\[ \]\s*(.*?)\s*📅 (\d{4}-)?(\d+-\d+)\s*(\d+:\d+)?/g;
 
         // 2. 核心优化：处理用户配置的文件夹
         if (includedFoldersSetting && includedFoldersSetting.trim() !== '') {
@@ -220,7 +221,7 @@ var m = class extends n.Plugin {
                 messageContent += `- 📅 ${daysDiff} ${task.dueDate.format("HH:mm")} ${task.description}\n`;
             });
 
-            await this.sendQmsgNotification(s, t, messageContent.trim());
+            await this.sendMsg(u,k,s,rb, messageContent.trim());
         }
         this.settings.nextScheduledTime = next_scheduled_time.toISOString();
         this.saveSettings();
@@ -270,7 +271,7 @@ var m = class extends n.Plugin {
                 const dueDateMoment = moment(fulldateStr + " " + timeStr, "YYYY-MM-DD HH:mm")
 
                 if (!dueDateMoment || !dueDateMoment.isValid()) {
-                    console.warn(`Invalid date format: ${dueDateStr} in file ${file.path}`);
+                    console.warn(`Invalid date format: ${fulldateStr + " " + timeStr} in file ${file.path}`);
                     continue; // 跳过无效日期格式
                 }
 
@@ -288,51 +289,52 @@ var m = class extends n.Plugin {
         }
         return tasksFound;
     }
-
     /**
-   * 发送 QQPusher 通知
-   * @param {string} s - appToken
-   * @param {string} t - 用户UID
+   * 发送 Pusher 通知
+   * @param {string} url - 请求的url
+   * @param {string} rbody - 请求体
    * @param {string} e - 消息内容
    * @param {boolean} i - 是否为测试消息
    */
-    async sendQmsgNotification(s, t, e, i = !1) {
-        let u = "https://qmsg.zendee.cn/jsend/" + s;
-        let g = {
-            "msg": e,
-            "qq": t,
-        };
+    async sendMsg(url, msg_key, msg_string, rbody, e, i = !1) {
 
-        console.log(`Sending ${i ? "test " : ""}notification via QQPusher...`);
-        console.log("Payload:", JSON.stringify(g));
+        let parsedBody;
+        try {
+            parsedBody = JSON.parse(rbody);
+        } catch (error) {
+            new n.Notice("Failed to parse requestBody as JSON");
+            console.warn("Failed to parse requestBody as JSON:", error);
+            return
+        }
+
+        parsedBody[msg_key] = msg_string.replace(/{msg}/g, e);
+        console.log("Final Request Payload:", parsedBody);
 
         try {
             let a = await (0, n.requestUrl)({
-                url: u,
+                url: url,
                 method: "POST",
                 contentType: "application/json",
-                body: JSON.stringify(g)
+                body: JSON.stringify(parsedBody)
             });
 
-            console.log("QQPusher API Response Status:", a.status);
-
-            console.log("QQPusher API Response Body:", a.text);
+            console.log("Pusher API Response Body:", a.text);
 
             let l = a.json;
 
             // 检查响应状态
             if (a.status === 200 && l && l.code === 0) {
-                new n.Notice(`QQPusher ${i ? "test " : ""}message sent successfully!`);
-                console.log(`QQPusher ${i ? "test " : ""}message sent successfully!`);
+                new n.Notice(`Pusher ${i ? "test " : ""}message sent successfully!`);
+                console.log(`Pusher ${i ? "test " : ""}message sent successfully!`);
             } else {
                 let c = l ? l.msg : "Unknown error";
 
-                new n.Notice(`Failed to send QQPusher ${i ? "test " : ""}message: ${c}`);
-                console.error(`Failed to send QQPusher ${i ? "test " : ""}message:`, c, a.text);
+                new n.Notice(`Failed to send Pusher ${i ? "test " : ""}message: ${c}`);
+                console.error(`Failed to send Pusher ${i ? "test " : ""}message:`, c, a.text);
             }
         } catch (a) {
-            new n.Notice(`Error sending QQPusher ${i ? "test " : ""}message. Check console for details.`);
-            console.error(`Error sending QQPusher ${i ? "test " : ""}message:`, a);
+            new n.Notice(`Error sending Pusher ${i ? "test " : ""}message. Check console for details.`);
+            console.error(`Error sending Pusher ${i ? "test " : ""}message:`, a);
         }
     }
 
@@ -390,32 +392,52 @@ var x = class extends n.PluginSettingTab {
         s.empty();
 
         // 创建设置标题
-        s.createEl("h2", { text: "QQPusher Reminder Settings" });
+        s.createEl("h2", { text: "Pusher Reminder Settings" });
 
-        // QQPusher AppToken 设置
+        // url
         new n.Setting(s)
-            .setName("QQPusher AppToken")
-            .setDesc("Your QQPusher application token.")
+            .setName("Pusher URL")
+            .setDesc("Your Pusher application url.")
             .addText(t => t
-                .setPlaceholder("Enter your AppToken")
-                .setValue(this.plugin.settings.appToken)
+                .setPlaceholder("Enter your request API")
+                .setValue(this.plugin.settings.url)
                 .onChange(async e => {
-                    this.plugin.settings.appToken = e;
+                    this.plugin.settings.url = e;
                     await this.plugin.saveSettings();
                 }));
 
-        // QQPusher UID 设置
+        // Pusher RequestBody Setting
         new n.Setting(s)
-            .setName("QQPusher UID")
-            .setDesc("Your QQPusher user ID (UID) to receive messages.")
-            .addText(t => t
-                .setPlaceholder("Enter your UID")
-                .setValue(this.plugin.settings.uid)
+            .setName("Request Body")
+            .setDesc("check your api docs")
+            .addTextArea(t => t
+                .setPlaceholder("e.g., { \"format\": \"xxx\", \"other_setting\": \"xxx\"}\" }")
+                .setValue(this.plugin.settings.requestBody)
                 .onChange(async e => {
-                    this.plugin.settings.uid = e;
+                    this.plugin.settings.requestBody = e;
                     await this.plugin.saveSettings();
                 }));
 
+        new n.Setting(s)
+            .setName("Msg key")
+            .addTextArea(t => t
+                .setPlaceholder("e.g., msg")
+                .setValue(this.plugin.settings.msg_key)
+                .onChange(async e => {
+                    this.plugin.settings.msg_key = e;
+                    await this.plugin.saveSettings();
+                }));
+
+        new n.Setting(s)
+            .setName("Msg format string")
+            .setDesc("use {msg} as msg placeholder")
+            .addTextArea(t => t
+                .setPlaceholder("e.g., {msg}")
+                .setValue(this.plugin.settings.msg_str)
+                .onChange(async e => {
+                    this.plugin.settings.msg_str = e;
+                    await this.plugin.saveSettings();
+                }));
         // 提醒天数设置
         new n.Setting(s)
             .setName("Reminder Days Before Due")
@@ -440,7 +462,7 @@ var x = class extends n.PluginSettingTab {
             .setName("Daily Scan Time")
             .setDesc("Time to scan tasks daily (24-hour format, e.g., 14:00 for 2 PM).")
             .addText(t => t
-                .setPlaceholder("e.g., 14:00")
+                .setPlaceholder("e.g., 8:00")
                 .setValue(this.plugin.settings.scanTime)
                 .onChange(async e => {
                     // 验证时间格式（HH:MM）
@@ -453,10 +475,10 @@ var x = class extends n.PluginSettingTab {
                     }
                 }));
         new n.Setting(s)
-            .setName("包含文件夹 (Included Folders)")
-            .setDesc("指定要扫描的文件夹路径（相对于库根目录），多个路径请用英文逗号分隔。例如：DailyNotes, Projects/Meetings。留空则扫描整个库。")
+            .setName("Included Folders/File")
+            .setDesc("指定要扫描的文件夹路径（相对于库根目录），多个路径请用英文逗号分隔。例如：DailyNotes,Projects/Meetings。留空则扫描整个库。")
             .addText(t => t
-                .setPlaceholder("例如：Todos")
+                .setPlaceholder("e.g., Todos")
                 .setValue(this.plugin.settings.includedFolders)
                 .onChange(async e => {
                     this.plugin.settings.includedFolders = e;
