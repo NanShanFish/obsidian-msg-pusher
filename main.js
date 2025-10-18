@@ -33,7 +33,8 @@ var R = {
     uid: "",          // QQ 号
     reminderDays: 7,  // 提前提醒天数（0=当天，1=明天等）
     scanTime: "14:00", // 每日扫描时间（24小时制）
-    includedFolders: ""
+    includedFolders: "",
+    nextScheduledTime: ""
 };
 
 var m = class extends n.Plugin {
@@ -46,7 +47,7 @@ var m = class extends n.Plugin {
             id: "check-tasks-and-send-reminders",
             name: "Check tasks and send reminders",
             callback: () => {
-                this.checkTasksAndSendReminders();
+                this.checkTasksAndSendReminders(true);
             }
         });
         const {TFile, TFolder} = require('obsidian')
@@ -117,9 +118,9 @@ var m = class extends n.Plugin {
         let e = "This is a test message from the Obsidian QQPusher Reminder plugin.";
         await this.sendQmsgNotification(s, t, e, !0);
     }
-    async checkTasksAndSendReminders() {
-        console.log("Checking tasks for reminders...");
-        let { appToken: s, uid: t, reminderDays: e, includedFolders: includedFoldersSetting } = this.settings;
+
+    async checkTasksAndSendReminders(force) {
+        let { appToken: s, uid: t, reminderDays: e, includedFolders: includedFoldersSetting, nextScheduledTime: last_next_time_str } = this.settings;
 
         if (!s || !t) {
             console.log("QQPusher appToken or UID is not configured. Skipping reminder check.");
@@ -127,7 +128,14 @@ var m = class extends n.Plugin {
         }
 
         // 1. 准备时间范围
-        let now = moment();
+        let [next_scheduled_time, o] = this.getNextScheduledTime();
+        const last_next_time = new Date(last_next_time_str)
+        if (last_next_time > o && !force) {
+            console.log("未到触发时间, 已停止")
+            return
+        }
+
+        let now = moment(o)
         let startDate = now.startOf('day');
         let endDate = now.clone().add(e, 'days').endOf('day');
 
@@ -143,7 +151,6 @@ var m = class extends n.Plugin {
 
             for (const folderPath of folderPaths) {
                 try {
-                    console.log(`Scanning folder: ${folderPath}`);
                     // 使用 getAbstractFileByPath 获取文件对象
                     const fileOrFolder = this.app.vault.getAbstractFileByPath(folderPath);
 
@@ -168,7 +175,6 @@ var m = class extends n.Plugin {
                         continue;
                     }
 
-                    console.log(`Found ${filesToScan.length} markdown files in path: ${folderPath}`);
 
                     // 3. 扫描找到的文件
                     for (const file of filesToScan) {
@@ -211,13 +217,13 @@ var m = class extends n.Plugin {
                     daysDiff = daysDiff + '天后'
                 }
 
-                messageContent += `- 📅 ${daysDiff} ${task.dueDate.format("HH:mm")}|${task.description}\n`;
+                messageContent += `- 📅 ${daysDiff} ${task.dueDate.format("HH:mm")} ${task.description}\n`;
             });
 
             await this.sendQmsgNotification(s, t, messageContent.trim());
-        } else {
-            console.log("No tasks due soon found.");
         }
+        this.settings.nextScheduledTime = next_scheduled_time.toISOString();
+        this.saveSettings();
     }
 
 
@@ -330,11 +336,7 @@ var m = class extends n.Plugin {
         }
     }
 
-    /**
-   * 启动每日定时扫描
-   * 根据设置中的扫描时间安排定时任务
-   */
-    startDailyScanTimer() {
+    getNextScheduledTime() {
         let { scanTime: s } = this.settings;
         // 解析扫描时间（小时和分钟）
         let [t, e] = s.split(":").map(Number);
@@ -348,7 +350,15 @@ var m = class extends n.Plugin {
         if (i <= o) {
             i.setDate(i.getDate() + 1);
         }
+        return [ i,o ]
+    }
 
+    /**
+   * 启动每日定时扫描
+   * 根据设置中的扫描时间安排定时任务
+   */
+    startDailyScanTimer() {
+        let [i,o] = this.getNextScheduledTime()
         // 计算距离下次扫描的毫秒数
         let u = i.getTime() - o.getTime();
 
