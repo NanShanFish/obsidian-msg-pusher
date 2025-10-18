@@ -1,0 +1,11 @@
+{
+	"id": "obsidian-qmsg-reminder",
+	"name": "Qmsg Reminder",
+	"version": "0.1.0",
+	"minAppVersion": "0.15.0",
+	"description": "Sends reminders for Obsidian tasks nearing their due date to QQ by Qmsg.",
+	"author": "nanshanfish",
+	"authorUrl": "https://github.com/nanshanfish/obsidian-qmsg-reminder",
+	"fundingUrl": "",
+	"isDesktopOnly": false
+}

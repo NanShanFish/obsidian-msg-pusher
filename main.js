@@ -1,0 +1,456 @@
+/**
+ * 原始代码来自: Leibniz/obsidian-wxpusher-reminder (https://github.com/Liberniz/obsidian-wxpusher-reminder)
+ * 修改者: nanshanfish
+ * 修改内容: QQ消息适配/日期解析优化
+ */
+
+var y = Object.defineProperty;
+var T = Object.getOwnPropertyDescriptor;
+var D = Object.getOwnPropertyNames;
+var S = Object.prototype.hasOwnProperty;
+var w = (d, r) => {
+    for (var s in r) y(d, s, { get: r[s], enumerable: !0 });
+};
+var W = (d, r, s, t) => {
+    if (r && typeof r == "object" || typeof r == "function")
+        for (let e of D(r))
+    !S.call(d, e) && e !== s && y(d, e, { get: () => r[e], enumerable: !(t = T(r, e)) || t.enumerable });
+    return d;
+};
+var $ = d => W(y({}, "__esModule", { value: !0 }), d);
+var N = {};
+w(N, { default: () => m });
+
+module.exports = $(N);
+
+
+// 导入 Obsidian API
+var n = require("obsidian");
+
+// 插件默认设置
+var R = {
+    appToken: "",     // token
+    uid: "",          // QQ 号
+    reminderDays: 7,  // 提前提醒天数（0=当天，1=明天等）
+    scanTime: "14:00", // 每日扫描时间（24小时制）
+    includedFolders: ""
+};
+
+var m = class extends n.Plugin {
+    async onload() {
+        console.log("Loading QQPusher Reminder Plugin");
+        await this.loadSettings();
+
+        // 添加命令：检查任务并发送提醒
+        this.addCommand({
+            id: "check-tasks-and-send-reminders",
+            name: "Check tasks and send reminders",
+            callback: () => {
+                this.checkTasksAndSendReminders();
+            }
+        });
+        const {TFile, TFolder} = require('obsidian')
+        this.TFile = TFile
+        this.TFolder = TFolder
+
+        // 添加命令：测试 QQPusher 连接
+        this.addCommand({
+            id: "test-wxpusher-connection",
+            name: "Test QQPusher Connection",
+            callback: () => {
+                this.testQmsgConnection();
+            }
+        });
+
+
+        // 添加设置选项卡
+        this.addSettingTab(new x(this.app, this));
+
+
+        // 布局就绪后启动扫描
+        this.app.workspace.onLayoutReady(() => {
+
+            console.log("Obsidian layout ready, checking tasks...");
+            this.checkTasksAndSendReminders();
+            this.startDailyScanTimer(); // 启动定时扫描
+        });
+    }
+
+
+    /**
+   * 插件卸载时调用
+   */
+    async onunload() {
+        console.log("Unloading QQPusher Reminder Plugin");
+    }
+
+    /**
+   * 加载插件设置
+   */
+    async loadSettings() {
+        this.settings = Object.assign({}, R, await this.loadData());
+    }
+
+
+    /**
+   * 保存插件设置
+   */
+    async saveSettings() {
+        await this.saveData(this.settings);
+    }
+
+    /**
+   * 测试 QQPusher 连接
+   */
+    async testQmsgConnection() {
+        console.log("Testing QQPusher connection...");
+        let { appToken: s, uid: t } = this.settings;
+
+        // 检查配置是否完整
+        if (!s || !t) {
+            new n.Notice("QQPusher appToken or UID is not configured. Please configure it in the plugin settings.");
+            console.log("QQPusher appToken or UID is missing for test.");
+            return;
+        }
+
+        new n.Notice("Sending test message via QQPusher...");
+        let e = "This is a test message from the Obsidian QQPusher Reminder plugin.";
+        await this.sendQmsgNotification(s, t, e, !0);
+    }
+    async checkTasksAndSendReminders() {
+        console.log("Checking tasks for reminders...");
+        let { appToken: s, uid: t, reminderDays: e, includedFolders: includedFoldersSetting } = this.settings;
+
+        if (!s || !t) {
+            console.log("QQPusher appToken or UID is not configured. Skipping reminder check.");
+            return;
+        }
+
+        // 1. 准备时间范围
+        let now = moment();
+        let startDate = now.startOf('day');
+        let endDate = now.clone().add(e, 'days').endOf('day');
+
+        let taskCount = 0;
+        let tasksDueSoon = [];
+
+        // 用于匹配任务的正则表达式
+        let taskRegex = /-\s*\[ \]\s*(.*?)\s*📅 (\d{4}-)?(\d+-\d+)\s*(\d+:\d+)?/g;
+
+        // 2. 核心优化：处理用户配置的文件夹
+        if (includedFoldersSetting && includedFoldersSetting.trim() !== '') {
+            const folderPaths = includedFoldersSetting.split(',').map(path => path.trim());
+
+            for (const folderPath of folderPaths) {
+                try {
+                    console.log(`Scanning folder: ${folderPath}`);
+                    // 使用 getAbstractFileByPath 获取文件对象
+                    const fileOrFolder = this.app.vault.getAbstractFileByPath(folderPath);
+
+                    if (!fileOrFolder) {
+                        console.warn(`Path not found: ${folderPath}`);
+                        continue;
+                    }
+
+
+                    let filesToScan = [];
+
+
+                    // 判断获取到的是单个文件还是文件夹
+                    if (fileOrFolder instanceof this.TFile) {
+                        // 如果是单个文件，直接加入扫描列表
+                        filesToScan.push(fileOrFolder);
+                    } else if (fileOrFolder instanceof this.TFolder) {
+                        // 如果是文件夹，递归获取其下所有.md文件
+                        filesToScan = this.getAllMarkdownFilesInFolder(fileOrFolder);
+                    } else {
+                        console.warn(`Unsupported type at path: ${folderPath}`);
+                        continue;
+                    }
+
+                    console.log(`Found ${filesToScan.length} markdown files in path: ${folderPath}`);
+
+                    // 3. 扫描找到的文件
+                    for (const file of filesToScan) {
+
+                        const tasksInFile = await this.scanFileForTasks(file, taskRegex, startDate, endDate);
+                        tasksDueSoon.push(...tasksInFile);
+                        taskCount += tasksInFile.length;
+                    }
+
+
+                } catch (error) {
+                    console.error(`Error processing path '${folderPath}':`, error);
+                }
+            }
+        } else {
+            // 如果未配置包含文件夹，回退到原来的行为（扫描整个仓库）
+            console.log("No included folders configured, scanning all markdown files.");
+            const allMarkdownFiles = this.app.vault.getMarkdownFiles();
+            for (const file of allMarkdownFiles) {
+                const tasksInFile = await this.scanFileForTasks(file, taskRegex, startDate, endDate);
+                tasksDueSoon.push(...tasksInFile);
+                taskCount += tasksInFile.length;
+            }
+        }
+
+        console.log(`Found ${taskCount} tasks due within the next ${e} days.`);
+        if (tasksDueSoon.length > 0) {
+            tasksDueSoon.sort((a,b) => a.dueDate - b.dueDate);
+            let messageContent = `You have ${tasksDueSoon.length} task(s) due soon:\n\n`;
+
+            tasksDueSoon.forEach(task => {
+                var daysDiff = task.dueDate.diff(startDate, 'days');
+                if (daysDiff === 0) {
+                    daysDiff = '今天'
+                } else if (daysDiff === 1) {
+                    daysDiff = '明天'
+                } else if (daysDiff === 2) {
+                    daysDiff = '后天'
+                } else {
+                    daysDiff = daysDiff + '天后'
+                }
+
+                messageContent += `- 📅 ${daysDiff} ${task.dueDate.format("HH:mm")}|${task.description}\n`;
+            });
+
+            await this.sendQmsgNotification(s, t, messageContent.trim());
+        } else {
+            console.log("No tasks due soon found.");
+        }
+    }
+
+
+    /**
+ * 辅助函数：递归获取文件夹内所有Markdown文件
+ * @param {TFolder} folder - 要扫描的文件夹
+ * @returns {TFile[]} 该文件夹及其子文件夹下的所有.md文件
+ */
+    getAllMarkdownFilesInFolder(folder) {
+        let markdownFiles = [];
+        for (const child of folder.children) {
+            if (child instanceof this.TFile && child.extension === 'md') {
+                markdownFiles.push(child);
+
+            } else if (child instanceof this.TFolder) {
+                // 递归扫描子文件夹
+                markdownFiles.push(...this.getAllMarkdownFilesInFolder(child));
+            }
+        }
+        return markdownFiles;
+    }
+
+    /**
+ * 辅助函数：扫描单个文件中的任务
+ * @param {TFile} file - 要扫描的文件
+ * @param {RegExp} taskRegex - 用于匹配任务的正则表达式
+ * @param {Moment} startDate - 提醒时间范围的开始日期
+ * @param {Moment} endDate - 提醒时间范围的结束日期
+ * @returns {Array} 找到的到期任务列表
+ */
+    async scanFileForTasks(file, taskRegex, startDate, endDate) {
+        const tasksFound = [];
+        try {
+            const fileContent = await this.app.vault.cachedRead(file);
+            let match;
+            taskRegex.lastIndex = 0; // 重置正则表达式状态
+
+            while ((match = taskRegex.exec(fileContent)) !== null) {
+                const taskDescription = match[1].trim();
+
+
+                const fulldateStr = match[2] ? match[2] + match[3] : moment().year() + "-" + match[3];
+                const timeStr = match[4] || "12:00";
+                const dueDateMoment = moment(fulldateStr + " " + timeStr, "YYYY-MM-DD HH:mm")
+
+                if (!dueDateMoment || !dueDateMoment.isValid()) {
+                    console.warn(`Invalid date format: ${dueDateStr} in file ${file.path}`);
+                    continue; // 跳过无效日期格式
+                }
+
+                // 检查任务是否在指定的时间范围内
+                if (dueDateMoment.isBetween(startDate, endDate, null, '[]')) {
+                    tasksFound.push({
+                        description: taskDescription,
+                        dueDate: dueDateMoment,
+                        file: file
+                    });
+                }
+            }
+        } catch (error) {
+            console.error(`Error reading or processing file ${file.path}:`, error);
+        }
+        return tasksFound;
+    }
+
+    /**
+   * 发送 QQPusher 通知
+   * @param {string} s - appToken
+   * @param {string} t - 用户UID
+   * @param {string} e - 消息内容
+   * @param {boolean} i - 是否为测试消息
+   */
+    async sendQmsgNotification(s, t, e, i = !1) {
+        let u = "https://qmsg.zendee.cn/jsend/" + s;
+        let g = {
+            "msg": e,
+            "qq": t,
+        };
+
+        console.log(`Sending ${i ? "test " : ""}notification via QQPusher...`);
+        console.log("Payload:", JSON.stringify(g));
+
+        try {
+            let a = await (0, n.requestUrl)({
+                url: u,
+                method: "POST",
+                contentType: "application/json",
+                body: JSON.stringify(g)
+            });
+
+            console.log("QQPusher API Response Status:", a.status);
+
+            console.log("QQPusher API Response Body:", a.text);
+
+            let l = a.json;
+
+            // 检查响应状态
+            if (a.status === 200 && l && l.code === 0) {
+                new n.Notice(`QQPusher ${i ? "test " : ""}message sent successfully!`);
+                console.log(`QQPusher ${i ? "test " : ""}message sent successfully!`);
+            } else {
+                let c = l ? l.msg : "Unknown error";
+
+                new n.Notice(`Failed to send QQPusher ${i ? "test " : ""}message: ${c}`);
+                console.error(`Failed to send QQPusher ${i ? "test " : ""}message:`, c, a.text);
+            }
+        } catch (a) {
+            new n.Notice(`Error sending QQPusher ${i ? "test " : ""}message. Check console for details.`);
+            console.error(`Error sending QQPusher ${i ? "test " : ""}message:`, a);
+        }
+    }
+
+    /**
+   * 启动每日定时扫描
+   * 根据设置中的扫描时间安排定时任务
+   */
+    startDailyScanTimer() {
+        let { scanTime: s } = this.settings;
+        // 解析扫描时间（小时和分钟）
+        let [t, e] = s.split(":").map(Number);
+        let o = new Date();
+        let i = new Date();
+
+        // 设置今天的扫描时间
+        i.setHours(t, e, 0, 0);
+
+        // 如果今天的时间已过，设置为明天
+        if (i <= o) {
+            i.setDate(i.getDate() + 1);
+        }
+
+        // 计算距离下次扫描的毫秒数
+        let u = i.getTime() - o.getTime();
+
+        // 设置定时器
+        setTimeout(() => {
+            this.checkTasksAndSendReminders();
+            // 设置每日间隔扫描（24小时）
+            setInterval(() => {
+                this.checkTasksAndSendReminders();
+            }, 24 * 60 * 60 * 1000);
+        }, u);
+
+        console.log(`Next task scan scheduled for ${i.toLocaleString()}`);
+    }
+};
+
+// 插件设置选项卡类 [3](@ref)
+var x = class extends n.PluginSettingTab {
+    constructor(s, t) {
+        super(s, t);
+        this.plugin = t;
+    }
+
+    /**
+   * 显示设置界面
+   */
+    display() {
+        let { containerEl: s } = this;
+        s.empty();
+
+        // 创建设置标题
+        s.createEl("h2", { text: "QQPusher Reminder Settings" });
+
+        // QQPusher AppToken 设置
+        new n.Setting(s)
+            .setName("QQPusher AppToken")
+            .setDesc("Your QQPusher application token.")
+            .addText(t => t
+                .setPlaceholder("Enter your AppToken")
+                .setValue(this.plugin.settings.appToken)
+                .onChange(async e => {
+                    this.plugin.settings.appToken = e;
+                    await this.plugin.saveSettings();
+                }));
+
+        // QQPusher UID 设置
+        new n.Setting(s)
+            .setName("QQPusher UID")
+            .setDesc("Your QQPusher user ID (UID) to receive messages.")
+            .addText(t => t
+                .setPlaceholder("Enter your UID")
+                .setValue(this.plugin.settings.uid)
+                .onChange(async e => {
+                    this.plugin.settings.uid = e;
+                    await this.plugin.saveSettings();
+                }));
+
+        // 提醒天数设置
+        new n.Setting(s)
+            .setName("Reminder Days Before Due")
+            .setDesc("Number of days before the due date to send a reminder (e.g., 1 for tomorrow, 0 for today).")
+            .addText(t => t
+                .setPlaceholder("e.g., 1")
+                .setValue(String(this.plugin.settings.reminderDays))
+                .onChange(async e => {
+                    let o = parseInt(e);
+
+                    if (!isNaN(o) && o >= 0) {
+                        this.plugin.settings.reminderDays = o;
+
+                        await this.plugin.saveSettings();
+                    } else {
+                        new n.Notice("Please enter a valid non-negative number for reminder days.");
+                    }
+                }));
+
+        // 每日扫描时间设置
+        new n.Setting(s)
+            .setName("Daily Scan Time")
+            .setDesc("Time to scan tasks daily (24-hour format, e.g., 14:00 for 2 PM).")
+            .addText(t => t
+                .setPlaceholder("e.g., 14:00")
+                .setValue(this.plugin.settings.scanTime)
+                .onChange(async e => {
+                    // 验证时间格式（HH:MM）
+                    if (/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/.test(e)) {
+                        this.plugin.settings.scanTime = e;
+                        await this.plugin.saveSettings();
+                        this.plugin.startDailyScanTimer(); // 重新启动定时器
+                    } else {
+                        new n.Notice("Please enter a valid time in 24-hour format (HH:MM).");
+                    }
+                }));
+        new n.Setting(s)
+            .setName("包含文件夹 (Included Folders)")
+            .setDesc("指定要扫描的文件夹路径（相对于库根目录），多个路径请用英文逗号分隔。例如：DailyNotes, Projects/Meetings。留空则扫描整个库。")
+            .addText(t => t
+                .setPlaceholder("例如：Todos")
+                .setValue(this.plugin.settings.includedFolders)
+                .onChange(async e => {
+                    this.plugin.settings.includedFolders = e;
+                    await this.plugin.saveSettings();
+                }));
+    }
+};
