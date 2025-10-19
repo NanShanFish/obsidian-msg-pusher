@@ -144,7 +144,7 @@ var m = class extends n.Plugin {
         let tasksDueSoon = [];
 
         // 用于匹配任务的正则表达式
-        const taskRegex = /-\s*\[ \]\s*(.*?)\s*📅 (\d{4}-)?(\d+-\d+)\s*(\d+:\d+)?/g;
+        const taskRegex = /-\s*\[ \]\s*📅 (\d{4}-)?(\d+-\d+)\s*(\d+:\d+)?\s*(.*?)\s*/g;
 
         // 2. 核心优化：处理用户配置的文件夹
         if (includedFoldersSetting && includedFoldersSetting.trim() !== '') {
@@ -263,11 +263,11 @@ var m = class extends n.Plugin {
             taskRegex.lastIndex = 0; // 重置正则表达式状态
 
             while ((match = taskRegex.exec(fileContent)) !== null) {
-                const taskDescription = match[1].trim();
+                const taskDescription = match[4].trim();
 
 
-                const fulldateStr = match[2] ? match[2] + match[3] : moment().year() + "-" + match[3];
-                const timeStr = match[4] || "12:00";
+                const fulldateStr = match[1] ? match[1] + match[2] : moment().year() + "-" + match[2];
+                const timeStr = match[3] || "12:00";
                 const dueDateMoment = moment(fulldateStr + " " + timeStr, "YYYY-MM-DD HH:mm")
 
                 if (!dueDateMoment || !dueDateMoment.isValid()) {

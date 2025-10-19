@@ -1,4 +1,4 @@
-# Obsidian QQPusher Reminder
+# Obsidian Pusher Reminder
 
 > [!NOTE] 🔄 **重要说明**：本插件是基于 [Liberniz/obsidian-wxpusher-reminder](https://github.com/Liberniz/obsidian-wxpusher-reminder) 的二次开发版本。
 
@@ -65,10 +65,10 @@
 插件会扫描以下格式的未完成任务项：
 ```markdown
 
-- [ ] 任务描述 📅 YYYY-MM-DD HH:mm
-- [ ] 任务描述 📅 MM-DD HH:mm
-- [ ] 任务描述 📅 YYYY-MM-DD
-- [ ] 任务描述 📅 MM-DD
+- [ ] 📅 YYYY-MM-DD HH:mm 任务描述
+- [ ] 📅 MM-DD HH:mm 任务描述
+- [ ] 📅 YYYY-MM-DD 任务描述
+- [ ] 📅 MM-DD 任务描述
 ```
 **日期说明**：
 - **年份（YYYY）**：如果省略，则默认为当前年份。

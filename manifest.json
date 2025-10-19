@@ -1,8 +1,8 @@
 {
 	"id": "obsidian-msg-pusher",
 	"name": "Msg-Pusher",
-	"version": "0.1.2",
-	"minAppVersion": "0.15.0",
+	"version": "1.0.0",
+	"minAppVersion": "0.14.0",
 	"description": "Sends reminders for Obsidian tasks nearing their due date by any api.",
 	"author": "nanshanfish",
 	"authorUrl": "https://github.com/nanshanfish/obsidian-msg-pusher",
