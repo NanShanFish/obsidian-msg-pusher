@@ -144,7 +144,7 @@ var m = class extends n.Plugin {
         let tasksDueSoon = [];
 
         // 用于匹配任务的正则表达式
-        const taskRegex = /-\s*\[ \]\s*📅 (\d{4}-)?(\d+-\d+)\s*(\d+:\d+)?\s*(.*?)\s*/g;
+        const taskRegex = /-\s*\[ \]\s*📅 (\d{4}-)?(\d+-\d+)\s*(\d+:\d{2})?\s+(.*)/g
 
         // 2. 核心优化：处理用户配置的文件夹
         if (includedFoldersSetting && includedFoldersSetting.trim() !== '') {
@@ -468,6 +468,8 @@ var x = class extends n.PluginSettingTab {
                     // 验证时间格式（HH:MM）
                     if (/^([01]?[0-9]|2[0-3]):[0-5][0-9]$/.test(e)) {
                         this.plugin.settings.scanTime = e;
+                        let [i, o] = this.plugin.getNextScheduledTime();
+                        this.plugin.settings.nextScheduledTime = i.toISOString();
                         await this.plugin.saveSettings();
                         this.plugin.startDailyScanTimer(); // 重新启动定时器
                     } else {
